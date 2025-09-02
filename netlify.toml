@@ -1,7 +1,7 @@
 [build]
   publish = "build/web"
-  command = "pip install -r requirements.txt && flet build web --output build/web"
-  
+  command = "pip install -r requirements.txt && python -m flet build main_pyodide.py --output build/web"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

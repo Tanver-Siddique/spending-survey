@@ -1,6 +1,5 @@
-# main.py
+# main_pyodide.py
 import flet as ft
-import asyncio
 from Title_animation import GradientAnimatedTextContainer
 from data import start_text
 
@@ -13,12 +12,14 @@ class Survey(ft.Container):
         self.question_manager = None
         self.is_completed = False
 
+        # Title animation
         self.title_text = GradientAnimatedTextContainer(
             value="Desires After Duties",
             font_family="title_font",
             no_wrap=False
         )
 
+        # Language switcher
         self.language_slider = ft.SegmentedButton(
             selected={"1"},
             allow_multiple_selection=False,
@@ -31,8 +32,9 @@ class Survey(ft.Container):
             col={"xs": 6, "sm": 3, "md": 2, "lg": 2},
         )
 
+        # Main content area
         self.main_content_controls = ft.Column(
-            spacing=8, horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=8, horizontal_alignment=ft.CrossAxisAlignment.CENTER
         )
 
         self.main_content_container_column = ft.Column(
@@ -61,6 +63,7 @@ class Survey(ft.Container):
             ],
         )
 
+        # Layout
         self.content = ft.Column(
             expand=True,
             controls=[
@@ -68,14 +71,12 @@ class Survey(ft.Container):
                 ft.ResponsiveRow(
                     alignment=ft.MainAxisAlignment.CENTER,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    controls=[
-                        ft.Column(
-                            col={"xs": 12},
-                            alignment=ft.MainAxisAlignment.CENTER,
-                            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                            controls=[self.title_text],
-                        )
-                    ],
+                    controls=[ft.Column(
+                        col={"xs": 12},
+                        alignment=ft.MainAxisAlignment.CENTER,
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                        controls=[self.title_text]
+                    )]
                 ),
                 ft.Divider(color=ft.Colors.TRANSPARENT, height=10),
                 ft.ResponsiveRow(
@@ -90,53 +91,29 @@ class Survey(ft.Container):
 
         self._refresh_content()
 
+    # Intro page
     def _create_intro_controls(self):
         t = start_text[self.language]
         return [
-            ft.Text(
-                value=t["welcome"],
-                size=25,
-                font_family="Arial",
-                weight=ft.FontWeight.BOLD,
-                color=ft.Colors.BLUE_GREY_900,
-            ),
+            ft.Text(value=t["welcome"], size=25, font_family="Arial",
+                    weight=ft.FontWeight.BOLD, color=ft.Colors.BLUE_GREY_900),
             ft.Text(value=t["request"], size=20, color=ft.Colors.BLUE_GREY_500),
-            ft.Text(
-                value=t["description"],
-                size=12,
-                color=ft.Colors.BLACK,
-                text_align=ft.TextAlign.JUSTIFY,
-            ),
+            ft.Text(value=t["description"], size=12,
+                    color=ft.Colors.BLACK, text_align=ft.TextAlign.JUSTIFY),
             ft.Row(
                 alignment=ft.MainAxisAlignment.SPACE_EVENLY,
                 controls=[
-                    ft.Row(
-                        spacing=4,
-                        controls=[
-                            ft.Icon(name=ft.Icons.TIMER_ROUNDED, color=ft.Colors.BLACK),
-                            ft.Text(
-                                value=t["time"],
-                                weight=ft.FontWeight.BOLD,
-                                size=12,
-                                color=ft.Colors.BLACK,
-                            ),
-                        ],
-                    ),
-                    ft.Row(
-                        spacing=4,
-                        controls=[
-                            ft.Icon(
-                                name=ft.Icons.ENHANCED_ENCRYPTION_ROUNDED,
-                                color=ft.Colors.BLACK,
-                            ),
-                            ft.Text(
-                                value=t["anonymous"],
-                                weight=ft.FontWeight.BOLD,
-                                size=12,
-                                color=ft.Colors.BLACK,
-                            ),
-                        ],
-                    ),
+                    ft.Row(spacing=4, controls=[
+                        ft.Icon(name=ft.Icons.TIMER_ROUNDED, color=ft.Colors.BLACK),
+                        ft.Text(value=t["time"], weight=ft.FontWeight.BOLD,
+                                size=12, color=ft.Colors.BLACK)
+                    ]),
+                    ft.Row(spacing=4, controls=[
+                        ft.Icon(name=ft.Icons.ENHANCED_ENCRYPTION_ROUNDED,
+                                color=ft.Colors.BLACK),
+                        ft.Text(value=t["anonymous"], weight=ft.FontWeight.BOLD,
+                                size=12, color=ft.Colors.BLACK)
+                    ]),
                 ],
             ),
             ft.Divider(),
@@ -145,10 +122,11 @@ class Survey(ft.Container):
                 bgcolor=ft.Colors.BLUE_GREY_200,
                 color=ft.Colors.BLACK,
                 style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=5)),
-                on_click=self.clicked_start_survey,
+                on_click=self.clicked_start_survey
             ),
         ]
 
+    # Questionnaire page
     def _create_questionnaire_controls(self):
         from survey import general_info_questions
         
@@ -161,6 +139,7 @@ class Survey(ft.Container):
             self.question_manager.update_language(self.language)
             return [self.question_manager.main_container]
 
+    # Refresh content based on page
     def _refresh_content(self):
         self.main_content_controls.controls.clear()
         if self.current_page == "intro":
@@ -175,14 +154,16 @@ class Survey(ft.Container):
     def change_language(self, e):
         selected_value = list(e.control.selected)[0]
         self.language = "en" if selected_value == "0" else "bn"
-
         if self.question_manager:
             self.question_manager.update_language(self.language)
         else:
             self._refresh_content()
 
+    def clicked_start_survey(self, e):
+        self.current_page = "questionnaire"
+        self._refresh_content()
+
     def on_view_change(self, e):
-        # Responsive title size
         size = 50
         if self.page.width < 600:
             size = 25
@@ -192,60 +173,37 @@ class Survey(ft.Container):
             self.title_text.text_control.size = size
         self.page.update()
 
-    def clicked_start_survey(self, e):
-        self.current_page = "questionnaire"
-        self._refresh_content()
 
-
-# --------- LOADING LOGIC ----------
-async def load_survey(page: ft.Page):
-    page.controls.clear()
-    survey_container = Survey(page)
-    page.on_resized = survey_container.on_view_change
-    page.add(survey_container)
-    # Animate gradient only if coroutine exists
-    if hasattr(survey_container.title_text, "animate_gradient_task"):
-        page.run_task(survey_container.title_text.animate_gradient_task)
-    survey_container.on_view_change(None)
-    page.update()
-
-
-# --------- MAIN ENTRY POINT ----------
+# ---------------- MAIN ENTRY POINT ----------------
 def main(page: ft.Page):
     page.title = "Survey"
     page.spacing = 0
     page.padding = 0
-    page.fonts = {
-        "title_font": "ZenDots-Regular.ttf"
-    }
+    page.fonts = {"title_font": "ZenDots-Regular.ttf"}
 
     page.theme = ft.Theme(
         scrollbar_theme=ft.ScrollbarTheme(
-            thumb_color={
-                ft.ControlState.HOVERED: ft.Colors.BLACK,
-                ft.ControlState.DEFAULT: ft.Colors.BLACK87,
-            },
+            thumb_color={ft.ControlState.HOVERED: ft.Colors.BLACK,
+                         ft.ControlState.DEFAULT: ft.Colors.BLACK87},
             track_color=ft.Colors.GREY_800,
             thickness=10,
             radius=5,
-            interactive=True,
+            interactive=True
         )
     )
-    
-    # Create and add survey directly (no loading screen)
+
     survey_container = Survey(page)
     page.on_resized = survey_container.on_view_change
     page.add(survey_container)
-    
-    # Animate gradient
+
     if hasattr(survey_container.title_text, "animate_gradient_task"):
         page.run_task(survey_container.title_text.animate_gradient_task)
     survey_container.on_view_change(None)
 
 
-
+# ---------------- FLET APP CALL ----------------
 ft.app(
     target=main,
     view=ft.WEB_BROWSER,
-    route_url_strategy="hash"   # 👈 here
+    pyodide=True      # 👈 run entirely in the browser
 )
