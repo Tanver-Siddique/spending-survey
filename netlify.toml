@@ -2,7 +2,7 @@
 command = "python -m venv venv && . venv/bin/activate && pip install flet && flet build web"
 publish = "build/web"
 
-[redirects]
+[[redirects]]
 from = "/*"
 to = "/index.html"
 status = 200
