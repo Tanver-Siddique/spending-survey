@@ -1,6 +1,6 @@
 [build]
-command = "python -m venv venv && . venv/bin/activate && pip install flet && flet publish /opt/build/repo/main.py"
-publish = "build/web"
+command = "python -m venv venv && venv/bin/pip install flet && venv/bin/flet publish /opt/build/repo/main.py"
+publish = "build/web
 
 [[redirects]]
   from = "/*"
