@@ -3,9 +3,18 @@ import flet as ft
 from data import *
 import asyncio
 import re
-import requests
 import string
 import random
+import json
+
+
+# Add this import for browser environment
+try:
+    from pyodide import to_js
+    import js
+    IN_BROWSER = True
+except ImportError:
+    IN_BROWSER = False
 
 # Map spending/assume option ids -> category datasets
 CATEGORY_MAP = {
@@ -460,10 +469,21 @@ class QuestionManager:
 
         self.answers["CONTACT"] = value
 
-        # Submit in a thread (network I/O)
-        await asyncio.to_thread(self._submit_data_to_google_sheet)
+        # Submit using the browser-compatible method
+        result = await self._submit_data_to_google_sheet()
+        
+        if result.get("status") == "error":
+            # Show error message
+            error_text.value = f"Submission failed: {result.get('message', 'Unknown error')}"
+            entry_field.disabled = False
+            self.submit_action_container.content = ft.ElevatedButton(
+                "Retry",
+                on_click=lambda e: self.page.run_task(self._process_final_submission, entry_field, error_text)
+            )
+            self.page.update()
+            return
 
-        # Show the end screen (which will also keep the submission id)
+        # Show the end screen
         self.show_end()
 
 
@@ -884,10 +904,11 @@ class QuestionManager:
     def _generate_submission_id(self, length=4):
         chars = string.ascii_uppercase + string.digits
         return ''.join(random.choice(chars) for _ in range(length))
+    
 
-    def _submit_data_to_google_sheet(self):
+    async def _submit_data_to_google_sheet(self):
         if not self.APPS_SCRIPT_URL or "YOUR_UNIQUE_URL_HERE" in self.APPS_SCRIPT_URL:
-            return
+            return {"status": "error", "message": "No valid URL configured"}
 
         # Ensure we always have a submission id
         if "Submission_ID" not in self.answers:
@@ -917,15 +938,40 @@ class QuestionManager:
         }
 
         try:
-            response = requests.post(self.APPS_SCRIPT_URL, json=payload, timeout=10)
-            response.raise_for_status()
-            try:
-                response_data = response.json()
-            except ValueError:
-                response_data = {"status": "unknown", "raw_text": response.text}
-            return response_data  # return so caller can handle
-        except requests.exceptions.RequestException:
-            return {"status": "error", "message": "Failed to send data"}
+            if IN_BROWSER:
+                # Use JavaScript fetch API in browser environment
+                response = await js.fetch(
+                    self.APPS_SCRIPT_URL,
+                    js.Object.fromEntries(to_js({
+                        "method": "POST",
+                        "headers": {
+                            "Content-Type": "application/json",
+                        },
+                        "body": json.dumps(payload)
+                    }))
+                )
+                
+                if response.ok:
+                    text = await response.text()
+                    try:
+                        response_data = json.loads(text)
+                    except ValueError:
+                        response_data = {"status": "unknown", "raw_text": text}
+                    return response_data
+                else:
+                    return {"status": "error", "message": f"HTTP error {response.status}"}
+            else:
+                # Use requests in non-browser environment (for testing)
+                import requests
+                response = requests.post(self.APPS_SCRIPT_URL, json=payload, timeout=10)
+                response.raise_for_status()
+                try:
+                    response_data = response.json()
+                except ValueError:
+                    response_data = {"status": "unknown", "raw_text": response.text}
+                return response_data
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
 
 
     def show_end(self):
