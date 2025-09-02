@@ -1,6 +1,6 @@
 [build]
   publish = "build/web"
-  command = "pip install -r requirements.txt && flet build web"
+  command = "pip install -r requirements.txt && python -m flet build web"
 
 [[redirects]]
   from = "/*"
