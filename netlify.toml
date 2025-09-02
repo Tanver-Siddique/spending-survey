@@ -1,6 +1,6 @@
 [build]
-  publish = "build/web"
-  command = "pip install -r requirements.txt && python -m flet build main_pyodide.py --output build/web"
+command = "python -m venv venv && . venv/bin/activate && pip install flet && flet publish --name desires-after-duties"
+publish = "build/web"
 
 [[redirects]]
   from = "/*"
