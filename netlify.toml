@@ -1,6 +1,5 @@
 [build]
-base = "/"
-command = "python -m venv venv && . venv/bin/activate && pip install flet && flet publish main.py"
+command = "python -m venv venv && . venv/bin/activate && pip install flet && cd /opt/build/repo && flet publish main.py"
 publish = "build/web"
 
 [[redirects]]
