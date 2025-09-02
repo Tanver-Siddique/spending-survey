@@ -1,7 +1,7 @@
 [build]
   publish = "build/web"
-  command = "pip install -r requirements.txt && python -c \"import flet; flet.build_web()\""
-
+  command = "pip install -r requirements.txt && flet pack --web --output build/web"
+  
 [[redirects]]
   from = "/*"
   to = "/index.html"
