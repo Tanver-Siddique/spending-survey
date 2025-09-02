@@ -1,7 +1,7 @@
 [build]
   publish = "build/web"
-  command = "pip install -r requirements.txt && flet run main.py --web --route-url-strategy=hash --output build/web"
-
+  command = "pip install -r requirements.txt && flet build web --output build/web"
+  
 [[redirects]]
   from = "/*"
   to = "/index.html"
