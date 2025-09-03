@@ -2,10 +2,58 @@
 import flet as ft
 from data import *
 import asyncio
+import sys
+import json
 import re
 import requests
 import string
 import random
+
+import re
+
+# Robust regex-only email validator (no external libs)
+EMAIL_REGEX = re.compile(
+    r"^(?=.{6,254}$)(?!.*\.\.)"                       # total length + no consecutive dots
+    r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+"               # local part (first chunk)
+    r"(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*"        # dot-separated local parts
+    r"@"                                             
+    r"(?:"                                           # domain alternatives:
+      r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"  # domain labels
+      r"[A-Za-z]{2,63}"                              # TLD (2-63 chars)
+    r"|"                                             
+      r"\[(?:IPv6:[A-Fa-f0-9:.]+|(?:\d{1,3}\.){3}\d{1,3})\]"  # or literal IP
+    r")$"
+)
+
+def validate_contact_value(value: str):
+    """
+    Validate contact entry:
+      - 11-digit Bangladeshi mobile number starting with '01'
+      - OR an email address validated by regex
+
+    Returns:
+      (True, {"type": "phone"|'email', "value": normalized_value})
+      (False, "error message")
+    """
+    if not value or not isinstance(value, str):
+        return False, "Please enter an email or 11-digit mobile number."
+
+    v = value.strip()
+
+    # Phone check for Bangladesh mobile numbers (e.g. 01XXXXXXXXX)
+    if v.isdigit() and len(v) == 11 and v.startswith("01"):
+        return True, {"type": "phone", "value": v}
+
+    # Fallback: regex-only email validation
+    if EMAIL_REGEX.match(v):
+        return True, {"type": "email", "value": v}
+
+    return False, "Enter a valid email address or 11-digit mobile starting with 01."
+
+
+def is_pyodide_environment():
+    """Check if code is running inside Pyodide (browser)."""
+    return "pyodide" in sys.modules
 
 # Map spending/assume option ids -> category datasets
 CATEGORY_MAP = {
@@ -34,6 +82,8 @@ class QuestionManager:
         self.on_complete = on_complete
         self.checkboxes = []
         self.is_completed = False
+        self._submitting = False
+        self._end_rendered_language = None
 
         self.added_categories = []
         self.blocks = []
@@ -439,32 +489,120 @@ class QuestionManager:
 
     # -------------------- UI render --------------------
     async def _process_final_submission(self, entry_field: ft.TextField, error_text: ft.Text):
-        """Validates contact, shows loading, submits data, and shows end screen."""
-        value = entry_field.value.strip()
-
-        # Final validation check
-        if not re.match(r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$', value) and \
-                not (value.isdigit() and len(value) == 11 and value.startswith("01")):
-            error_text.value = "Invalid format. Please check your entry."
-            self.page.update()
+        # prevent double submissions or running after completion
+        if self._submitting or self.is_completed:
             return
+        self._submitting = True
 
-        entry_field.disabled = True
-        error_text.value = ""
-        self.submit_action_container.content = ft.ProgressRing(width=24, height=24)
-        self.page.update()
+        try:
+            value = (entry_field.value or "").strip()
 
-        # Ensure submission id exists BEFORE sending
-        if "Submission_ID" not in self.answers:
-            self.answers["Submission_ID"] = self._generate_submission_id()
+            # --- validation (your regex-based check) ---
+            valid, result = validate_contact_value(value)
+            if not valid:
+                error_text.value = "Invalid format. Please check your entry."
+                try:
+                    self.page.update()
+                except Exception as e:
+                    # ignore socket send errors during update
+                    if "socket.send" not in str(e):
+                        raise
+                return
 
-        self.answers["CONTACT"] = value
+            # disable the entry and show spinner immediately (good UX + prevents extra clicks)
+            entry_field.disabled = True
+            error_text.value = ""
+            self.submit_action_container.content = ft.Row(
+                controls=[ft.ProgressRing(width=24, height=24, color=ft.Colors.BLUE_700),
+                        ft.Container(width=8),
+                        ft.Text("Submitting...", size=14, color=ft.Colors.BLACK54)],
+                alignment=ft.MainAxisAlignment.CENTER
+            )
+            try:
+                self.page.update()
+            except Exception as e:
+                # if the socket is already closed, just log and continue (don't crash)
+                if "socket.send" not in str(e):
+                    raise
 
-        # Submit in a thread (network I/O)
-        await asyncio.to_thread(self._submit_data_to_google_sheet)
+            # Ensure Submission_ID present and save contact
+            if "Submission_ID" not in self.answers:
+                self.answers["Submission_ID"] = self._generate_submission_id()
+            self.answers["CONTACT"] = value
 
-        # Show the end screen (which will also keep the submission id)
-        self.show_end()
+            # Submit with a timeout so UI recovers on slow networks
+            try:
+                result = await asyncio.wait_for(self._submit_data_to_google_sheet(), timeout=20)
+            except asyncio.TimeoutError:
+                error_text.value = "Request timed out. Please check your internet and try again."
+                entry_field.disabled = False
+                self.submit_action_container.content = ft.ElevatedButton(
+                    text="Retry",
+                    on_click=lambda e: self.page.run_task(self._process_final_submission, entry_field, error_text),
+                    style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=5)),
+                )
+                try:
+                    self.page.update()
+                except Exception:
+                    pass
+                return
+            except Exception as e:
+                error_text.value = f"Submission error: {e}"
+                entry_field.disabled = False
+                self.submit_action_container.content = ft.ElevatedButton(
+                    text="Retry",
+                    on_click=lambda e: self.page.run_task(self._process_final_submission, entry_field, error_text),
+                    style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=5)),
+                )
+                try:
+                    self.page.update()
+                except Exception:
+                    pass
+                return
+
+            # check response for error
+            if result and isinstance(result, dict) and result.get("status") == "error":
+                error_text.value = f"Submission failed: {result.get('message', 'Unknown error')}"
+                entry_field.disabled = False
+                self.submit_action_container.content = ft.ElevatedButton(
+                    text="Retry",
+                    on_click=lambda e: self.page.run_task(self._process_final_submission, entry_field, error_text),
+                    style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=5)),
+                )
+                try:
+                    self.page.update()
+                except Exception:
+                    pass
+                return
+
+            # success -> show end
+            try:
+                self.submit_action_container.content = ft.Row(
+                    controls=[
+                        ft.Icon(ft.Icons.CHECK, size=20, color=ft.Colors.GREEN),
+                        ft.Container(width=8),
+                        ft.Text("Submitted", size=14, weight=ft.FontWeight.W_600, color=ft.Colors.GREEN),
+                    ],
+                    alignment=ft.MainAxisAlignment.CENTER,
+                )
+                self.page.update()
+
+                # small pause so the user sees success (keeps UI responsive)
+                await asyncio.sleep(0.8)
+                self.show_end()
+            except Exception as e:
+                # sometimes page/socket closed while finishing — ignore socket.send errors
+                if "socket.send" in str(e):
+                    print("Ignored socket.send error during show_end():", e)
+                else:
+                    raise
+
+        finally:
+            # release guard (if you want to keep it locked after success, only set False on errors)
+            # we keep it False so future submissions are allowed in subsequent runs, but if the survey
+            # is completed the is_completed flag prevents re-entry anyway.
+            self._submitting = False
+
 
 
     def update_button_states(self):
@@ -885,22 +1023,23 @@ class QuestionManager:
         chars = string.ascii_uppercase + string.digits
         return ''.join(random.choice(chars) for _ in range(length))
 
-    def _submit_data_to_google_sheet(self):
+    async def _submit_data_to_google_sheet(self):
         if not self.APPS_SCRIPT_URL or "YOUR_UNIQUE_URL_HERE" in self.APPS_SCRIPT_URL:
-            return
+            return {"status": "error", "message": "Invalid Google Script URL"}
 
         # Ensure we always have a submission id
         if "Submission_ID" not in self.answers:
             self.answers["Submission_ID"] = self._generate_submission_id()
         submission_id = self.answers.get("Submission_ID")
 
+        # Prepare answered categories
         answered_categories = set()
         category_prefixes = {
             "FA": "Fashion", "AC": "Accessories", "BS": "Beauty", "PF": "Food",
             "HO": "Hobbies", "HD": "HomeDecor", "HK": "HomeKitchen", "EG": "Gadget",
             "BK": "BabyKids"
         }
-        # iterate safely over keys
+
         for qid in list(self.answers.keys()):
             prefix = None
             if len(qid) >= 2 and qid[:2] in category_prefixes:
@@ -916,20 +1055,57 @@ class QuestionManager:
             "answers": self.answers
         }
 
-        try:
-            response = requests.post(self.APPS_SCRIPT_URL, json=payload, timeout=10)
-            response.raise_for_status()
+        # --- Browser (Pyodide) Logic (async) ---
+        if is_pyodide_environment():
+            from pyodide.http import pyfetch
             try:
-                response_data = response.json()
-            except ValueError:
-                response_data = {"status": "unknown", "raw_text": response.text}
-            return response_data  # return so caller can handle
-        except requests.exceptions.RequestException:
-            return {"status": "error", "message": "Failed to send data"}
+                response = await pyfetch(
+                    url=self.APPS_SCRIPT_URL,
+                    method="POST",
+                    headers={"Content-Type": "application/json"},
+                    body=json.dumps(payload)
+                )
+                # try to parse JSON but handle non-json responses
+                try:
+                    data = await response.json()
+                except Exception:
+                    text = await response.text()
+                    data = {"status": "unknown", "raw_text": text}
+                return data
+            except Exception as e:
+                return {"status": "error", "message": f"Failed in browser: {str(e)}"}
+
+        # --- Local Python Logic (requests) - run blocking I/O off the event loop ---
+        else:
+            import requests
+
+            def _sync_post():
+                try:
+                    resp = requests.post(self.APPS_SCRIPT_URL, json=payload, timeout=10)
+                    resp.raise_for_status()
+                    try:
+                        return resp.json()
+                    except ValueError:
+                        return {"status": "unknown", "raw_text": resp.text}
+                except requests.exceptions.RequestException as e:
+                    return {"status": "error", "message": f"Failed locally: {str(e)}"}
+
+            # run the blocking requests call in a thread so the UI can update
+            result = await asyncio.to_thread(_sync_post)
+            return result
+
 
 
     def show_end(self):
-        # Mark completed
+        """
+        Show the end screen. Idempotent *unless* language changed — in that case
+        it will re-render the end content in the new language.
+        """
+        # If we've completed before and the end was already rendered in the current language, do nothing
+        if self.is_completed and self._end_rendered_language == self.language:
+            return
+
+        # Mark completed (keeps it True across calls)
         self.is_completed = True
 
         # Ensure there is a submission id
@@ -940,37 +1116,63 @@ class QuestionManager:
         # Ensure END exists in the question list (so language-switch and restore can find it)
         if "END" not in dict(self.questions):
             self.questions.append(("END", end[self.language]["END"]))
-        # Move current_index to END
+
+        # Move current_index to END (or fallback)
         end_idx = self._index_of_qid("END")
         if end_idx is not None:
             self.current_index = end_idx
         else:
-            # Fallback - set to last index
             self.current_index = max(0, len(self.questions) - 1)
 
         # Update progress
         self.progress_bar.value = 1.0
 
-        # Build and show end content
+        # Build and show end content in the *current* language
         end_content = ft.Column(
             scroll=ft.ScrollMode.AUTO, expand=True, height=350,
             controls=[
-                ft.Text("Thank you for completing the survey!" if self.language == "en" else "জরিপটি সম্পূর্ণ করার জন্য আপনাকে ধন্যবাদ!",
-                        size=22, color=ft.Colors.GREEN, text_align=ft.TextAlign.CENTER,
-                        ),
+                ft.Text(
+                    "Thank you for completing the survey!" if self.language == "en"
+                    else "জরিপটি সম্পূর্ণ করার জন্য আপনাকে ধন্যবাদ!",
+                    size=22, color=ft.Colors.GREEN, text_align=ft.TextAlign.CENTER,
+                ),
                 ft.Divider(),
-                ft.Text("Final Answers:" if self.language == "en" else "চূড়ান্ত উত্তর:",
-                        size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.BLACK,
-                        ),
+                ft.Text(
+                    "Final Answers:" if self.language == "en" else "চূড়ান্ত উত্তর:",
+                    size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.BLACK,
+                ),
                 *self.create_end_content(),
             ],
         )
+
         self.question_switcher.content = end_content
         self.previous_button_controls.visible = False
         self.next_button_controls.visible = False
-        self.page.update()
+        # Mark which language we rendered the end screen in
+        self._end_rendered_language = self.language
+
+        # Try safe page update
+        try:
+            self.page.update()
+        except Exception as e:
+            if "socket.send" not in str(e) and "websocket" not in str(e).lower():
+                raise
+
+        
+        # --- Call on_complete only once ---
         if self.on_complete:
-            self.on_complete()
+            try:
+                cb = self.on_complete
+                self.on_complete = None  # clear so it won't run again
+                cb()
+            except Exception as e:
+                msg = str(e).lower()
+                if "socket.send" in msg or "websocket" in msg:
+                    print("Ignored socket.send error in on_complete():", e)
+                else:
+                    raise
+
+
 
 
 def general_info_questions(page, language, on_complete=None):
