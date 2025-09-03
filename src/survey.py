@@ -5,7 +5,6 @@ import asyncio
 import sys
 import json
 import re
-import requests
 import string
 import random
 
@@ -1074,26 +1073,6 @@ class QuestionManager:
                 return data
             except Exception as e:
                 return {"status": "error", "message": f"Failed in browser: {str(e)}"}
-
-        # --- Local Python Logic (requests) - run blocking I/O off the event loop ---
-        else:
-            import requests
-
-            def _sync_post():
-                try:
-                    resp = requests.post(self.APPS_SCRIPT_URL, json=payload, timeout=10)
-                    resp.raise_for_status()
-                    try:
-                        return resp.json()
-                    except ValueError:
-                        return {"status": "unknown", "raw_text": resp.text}
-                except requests.exceptions.RequestException as e:
-                    return {"status": "error", "message": f"Failed locally: {str(e)}"}
-
-            # run the blocking requests call in a thread so the UI can update
-            result = await asyncio.to_thread(_sync_post)
-            return result
-
 
 
     def show_end(self):
