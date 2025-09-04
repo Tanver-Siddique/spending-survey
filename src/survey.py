@@ -2,6 +2,7 @@
 import flet as ft
 from data import *
 import asyncio
+import traceback
 import re
 import requests
 import string
@@ -37,6 +38,19 @@ class QuestionManager:
 
         self.added_categories = []
         self.blocks = []
+        self.shown_category_reminders = set()
+
+        self.CATEGORY_LABELS = {
+            1: {"en": "Start Fashion Questions",      "bn": "ফ্যাশন এর প্রশ্নসমূহ শুরু হচ্ছে"},
+            2: {"en": "Start Accessories Questions",  "bn": "এক্সেসরিজ এর প্রশ্নসমূহ শুরু হচ্ছে"},
+            3: {"en": "Start Beauty Questions",       "bn": "বিউটি এর প্রশ্নসমূহ শুরু হচ্ছে"},
+            4: {"en": "Start Dry Food Questions",     "bn": "শুকনো খাবার এর প্রশ্নসমূহ শুরু হচ্ছে"},
+            5: {"en": "Start Hobbies Questions",      "bn": "শখ এর প্রশ্নসমূহ শুরু হচ্ছে"},
+            6: {"en": "Start Home Decor Questions",   "bn": "হোম ডেকর এর প্রশ্নসমূহ শুরু হচ্ছে"},
+            7: {"en": "Start Home & Kitchen Questions","bn": "বাড়ি ও রান্নাঘর এর প্রশ্নসমূহ শুরু হচ্ছে"},
+            8: {"en": "Start Gadgets Questions",      "bn": "গ্যাজেট এর প্রশ্নসমূহ শুরু হচ্ছে"},
+            9: {"en": "Start Baby & Kids Questions",  "bn": "শিশু ও শিশুদের পণ্য এর প্রশ্নসমূহ শুরু হচ্ছে"},
+        }
 
         self.submit_action_container = ft.AnimatedSwitcher(
             content=ft.Container(),
@@ -94,6 +108,75 @@ class QuestionManager:
         self.show_question()
 
     # -------------------- helpers --------------------
+
+    async def _show_category_then_start(self, category_key: int, target_index: int):
+        """
+        Shows a full-white reminder screen with the localized category name for 2 seconds,
+        then jumps to target_index and shows the first question of that category.
+        """
+        try:
+            # don't re-show same reminder more than once per session
+            if category_key in self.shown_category_reminders:
+                self.current_index = target_index
+                self.show_question()
+                return
+
+            # get localized label (fallback)
+            label = self.CATEGORY_LABELS.get(category_key, {}).get(self.language)
+            if not label:
+                label = f"Category {category_key}"
+
+            # save visibility and hide nav while reminder shows
+            prev_prev_vis = getattr(self, "previous_button_controls", None)
+            prev_next_vis = getattr(self, "next_button_controls", None)
+            if prev_prev_vis is not None:
+                prev_prev_vis.visible = False
+            if prev_next_vis is not None:
+                prev_next_vis.visible = False
+
+            reminder = ft.Container(
+                expand=True,
+                height=300,
+                bgcolor=ft.Colors.WHITE,
+                content=ft.Column(
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        ft.Text(label, size=28, weight=ft.FontWeight.BOLD,
+                                color=ft.Colors.BLACK, text_align=ft.TextAlign.CENTER)
+                    ],
+                ),
+            )
+
+            # show reminder
+            self.question_switcher.content = reminder
+            self.page.update()
+
+            # wait 2 seconds
+            await asyncio.sleep(2)
+
+            # mark shown and restore nav visibility
+            self.shown_category_reminders.add(category_key)
+            if prev_prev_vis is not None:
+                prev_prev_vis.visible = True
+            if prev_next_vis is not None:
+                prev_next_vis.visible = True
+
+            # jump to the target question and render it
+            self.current_index = target_index
+            self.show_question()
+
+        except Exception:
+            # Prevent unhandled future exceptions and print trace
+            traceback.print_exc()
+            # fallback: ensure UI doesn't get stuck
+            try:
+                self.current_index = target_index
+                self.show_question()
+            except Exception:
+                pass
+
+
 
     def _commit_current_answer(self):
         """Saves the current state of inputs into self.answers without navigating."""
@@ -716,9 +799,22 @@ class QuestionManager:
                                             added_first_idx = idx
                                     break
                 if added_first_idx is not None:
-                    self.current_index = added_first_idx
-                    self.show_question()
-                    return
+                    # show reminder for the first added category then start its first question
+                    first_cat_key = None
+                    # find the block that starts at that qid to learn its category_key
+                    first_qid = self.questions[added_first_idx][0]
+                    for b in self.blocks:
+                        if b.get("type") == "category" and b.get("qids") and b["qids"][0] == first_qid:
+                            first_cat_key = b.get("category_key")
+                            break
+                    if first_cat_key is not None:
+                        # run async reminder coroutine
+                        self.page.run_task(self._show_category_then_start, first_cat_key, added_first_idx)
+                        return
+                    else:
+                        self.current_index = added_first_idx
+                        self.show_question()
+                        return
 
         # --- Handle AE5T (assume selection leading to adding a category) ---
         if qid == "AE5T":
@@ -760,6 +856,15 @@ class QuestionManager:
                             self.added_categories.append(chosen_key)
 
                 if new_idx is not None:
+                    # if we know the chosen category key, show its reminder first
+                    if isinstance(chosen_key, int) and chosen_key in CATEGORY_MAP:
+                        # schedule reminder using chosen_key and new_idx (NOT first_cat_key)
+                        if hasattr(self.page, "run_task"):
+                            self.page.run_task(self._show_category_then_start, chosen_key, new_idx)
+                        else:
+                            asyncio.create_task(self._show_category_then_start(chosen_key, new_idx))
+                        return
+                    # fallback: directly show the inserted question
                     self.current_index = new_idx
                     self.show_question()
                     return
@@ -768,9 +873,23 @@ class QuestionManager:
         if self._is_last_question_in_category(qid):
             next_idx = self._get_next_index_after_category()
             if next_idx is not None:
-                self.current_index = next_idx
-                self.show_question()
-                return
+                # if the next index starts a category block, show that category reminder first
+                next_qid = self.questions[next_idx][0]
+                next_block = None
+                for b in self.blocks:
+                    if b.get("type") == "category" and b.get("qids") and b["qids"][0] == next_qid:
+                        next_block = b
+                        break
+
+                if next_block and next_block.get("category_key") is not None:
+                    cat_key = next_block["category_key"]
+                    # show reminder then start next category
+                    self.page.run_task(self._show_category_then_start, cat_key, next_idx)
+                    return
+                else:
+                    self.current_index = next_idx
+                    self.show_question()
+                    return
 
         # --- Standard forward navigation ---
         if self.current_index < len(self.questions) - 1:
@@ -953,7 +1072,7 @@ class QuestionManager:
 
         # Build and show end content
         end_content = ft.Column(
-            scroll=ft.ScrollMode.AUTO, expand=True, height=350,
+            scroll=ft.ScrollMode.AUTO, expand=True, height=300,
             controls=[
                 ft.Text("Thank you for completing the survey!" if self.language == "en" else "জরিপটি সম্পূর্ণ করার জন্য আপনাকে ধন্যবাদ!",
                         size=22, color=ft.Colors.GREEN, text_align=ft.TextAlign.CENTER,
