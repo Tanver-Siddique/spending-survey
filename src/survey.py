@@ -26,7 +26,7 @@ class QuestionManager:
     def __init__(self, page, language="en", on_complete=None):
         self.page = page
         # integration url
-        self.APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxQ09tIWWTaZShnO1bNDRVS4AgqoAvysdOqhv7dealdtDlKvARK2AArh4AMDLeH5YlJxw/exec"
+        self.APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzcNrbSnmPUtg9A2iP2BlkRsY9Y3Zngi2INJIz33YxJ4t7rZ6Mm4_g3Xm1le_NEYMVsOA/exec"
 
         self.language = language
         self.questions = list(general_info[language].items())
@@ -41,15 +41,15 @@ class QuestionManager:
         self.shown_category_reminders = set()
 
         self.CATEGORY_LABELS = {
-            1: {"en": "Start Fashion Questions",      "bn": "ফ্যাশন এর প্রশ্নসমূহ শুরু হচ্ছে"},
-            2: {"en": "Start Accessories Questions",  "bn": "এক্সেসরিজ এর প্রশ্নসমূহ শুরু হচ্ছে"},
-            3: {"en": "Start Beauty Questions",       "bn": "বিউটি এর প্রশ্নসমূহ শুরু হচ্ছে"},
-            4: {"en": "Start Dry Food Questions",     "bn": "শুকনো খাবার এর প্রশ্নসমূহ শুরু হচ্ছে"},
-            5: {"en": "Start Hobbies Questions",      "bn": "শখ এর প্রশ্নসমূহ শুরু হচ্ছে"},
-            6: {"en": "Start Home Decor Questions",   "bn": "হোম ডেকর এর প্রশ্নসমূহ শুরু হচ্ছে"},
-            7: {"en": "Start Home & Kitchen Questions","bn": "বাড়ি ও রান্নাঘর এর প্রশ্নসমূহ শুরু হচ্ছে"},
-            8: {"en": "Start Gadgets Questions",      "bn": "গ্যাজেট এর প্রশ্নসমূহ শুরু হচ্ছে"},
-            9: {"en": "Start Baby & Kids Questions",  "bn": "শিশু ও শিশুদের পণ্য এর প্রশ্নসমূহ শুরু হচ্ছে"},
+            1: {"en": "Start Fashion Category Questions",      "bn": "ফ্যাশন এর প্রশ্নসমূহ শুরু হচ্ছে"},
+            2: {"en": "Start Accessories Category Questions",  "bn": "এক্সেসরিজ এর প্রশ্নসমূহ শুরু হচ্ছে"},
+            3: {"en": "Start Beauty Category Questions",       "bn": "বিউটি এর প্রশ্নসমূহ শুরু হচ্ছে"},
+            4: {"en": "Start Dry Food Category Questions",     "bn": "শুকনো খাবার এর প্রশ্নসমূহ শুরু হচ্ছে"},
+            5: {"en": "Start Hobbies Category Questions",      "bn": "শখ এর প্রশ্নসমূহ শুরু হচ্ছে"},
+            6: {"en": "Start Home Decor Category Questions",   "bn": "হোম ডেকর এর প্রশ্নসমূহ শুরু হচ্ছে"},
+            7: {"en": "Start Home & Kitchen Category Questions","bn": "বাড়ি ও রান্নাঘর এর প্রশ্নসমূহ শুরু হচ্ছে"},
+            8: {"en": "Start Gadgets Category Questions",      "bn": "গ্যাজেট এর প্রশ্নসমূহ শুরু হচ্ছে"},
+            9: {"en": "Start Baby & Kids Category Questions",  "bn": "শিশু ও শিশুদের পণ্য এর প্রশ্নসমূহ শুরু হচ্ছে"},
         }
 
         self.submit_action_container = ft.AnimatedSwitcher(
@@ -142,7 +142,7 @@ class QuestionManager:
                     alignment=ft.MainAxisAlignment.CENTER,
                     horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                     controls=[
-                        ft.Text(label, size=28, weight=ft.FontWeight.BOLD,
+                        ft.Text(label, size=25, weight=ft.FontWeight.BOLD,
                                 color=ft.Colors.BLACK, text_align=ft.TextAlign.CENTER)
                     ],
                 ),
@@ -153,7 +153,7 @@ class QuestionManager:
             self.page.update()
 
             # wait 2 seconds
-            await asyncio.sleep(2)
+            await asyncio.sleep(3)
 
             # mark shown and restore nav visibility
             self.shown_category_reminders.add(category_key)
