@@ -13,14 +13,12 @@ class Survey(ft.Container):
         self.question_manager = None
         self.is_completed = False
 
-        # Initialize title text
         self.title_text = GradientAnimatedTextContainer(
             value="Desires After Duties",
             font_family="title_font",
             no_wrap=False
         )
 
-        # Language selector
         self.language_slider = ft.SegmentedButton(
             selected={"1"},
             allow_multiple_selection=False,
@@ -33,10 +31,8 @@ class Survey(ft.Container):
             col={"xs": 6, "sm": 3, "md": 2, "lg": 2},
         )
 
-        # Main content area
         self.main_content_controls = ft.Column(
-            spacing=8, 
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=8, horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         )
 
         self.main_content_container_column = ft.Column(
@@ -65,7 +61,6 @@ class Survey(ft.Container):
             ],
         )
 
-        # Main layout
         self.content = ft.Column(
             expand=True,
             controls=[
@@ -93,14 +88,7 @@ class Survey(ft.Container):
             ],
         )
 
-        # Don't refresh content here - wait until after the control is added to the page
-        self.initialized = False
-
-    def initialize_content(self):
-        """Initialize content after the control is added to the page"""
-        if not self.initialized:
-            self._refresh_content()
-            self.initialized = True
+        self._refresh_content()
 
     def _create_intro_controls(self):
         t = start_text[self.language]
@@ -162,28 +150,16 @@ class Survey(ft.Container):
         ]
 
     def _create_questionnaire_controls(self):
-        try:
-            from survey import general_info_questions
-            
-            if self.question_manager is None:
-                self.question_manager = general_info_questions(
-                    self.page, self.language, on_complete=self.on_survey_complete
-                )
-                return [self.question_manager.main_container]
-            else:
-                self.question_manager.update_language(self.language)
-                return [self.question_manager.main_container]
-        except Exception as e:
-            import traceback
-            print(f"Error loading questionnaire: {str(e)}")
-            traceback.print_exc()
-            return [
-                ft.Text("Error loading survey. Please check the console for details.", color="red"),
-                ft.ElevatedButton(
-                    "Retry",
-                    on_click=lambda e: self._refresh_content()
-                )
-            ]
+        from survey import general_info_questions
+        
+        if self.question_manager is None:
+            self.question_manager = general_info_questions(
+                self.page, self.language, on_complete=self.on_survey_complete
+            )
+            return [self.question_manager.main_container]
+        else:
+            self.question_manager.update_language(self.language)
+            return [self.question_manager.main_container]
 
     def _refresh_content(self):
         self.main_content_controls.controls.clear()
@@ -191,19 +167,19 @@ class Survey(ft.Container):
             self.main_content_controls.controls.extend(self._create_intro_controls())
         elif self.current_page == "questionnaire":
             self.main_content_controls.controls.extend(self._create_questionnaire_controls())
-        
-        # Only update if the control is properly initialized
-        if self.initialized:
-            self.page.update()
+        self.page.update()
 
     def on_survey_complete(self):
         self.is_completed = True
-        print("Survey completed!")
 
     def change_language(self, e):
         selected_value = list(e.control.selected)[0]
         self.language = "en" if selected_value == "0" else "bn"
-        self._refresh_content()
+
+        if self.question_manager:
+            self.question_manager.update_language(self.language)
+        else:
+            self._refresh_content()
 
     def on_view_change(self, e):
         # Responsive title size
@@ -219,6 +195,19 @@ class Survey(ft.Container):
     def clicked_start_survey(self, e):
         self.current_page = "questionnaire"
         self._refresh_content()
+
+
+# --------- LOADING LOGIC ----------
+async def load_survey(page: ft.Page):
+    page.controls.clear()
+    survey_container = Survey(page)
+    page.on_resized = survey_container.on_view_change
+    page.add(survey_container)
+    # Animate gradient only if coroutine exists
+    if hasattr(survey_container.title_text, "animate_gradient_task"):
+        page.run_task(survey_container.title_text.animate_gradient_task)
+    survey_container.on_view_change(None)
+    page.update()
 
 
 # --------- MAIN ENTRY POINT ----------
@@ -243,13 +232,10 @@ def main(page: ft.Page):
         )
     )
     
-    # Create and add survey
+    # Create and add survey directly (no loading screen)
     survey_container = Survey(page)
     page.on_resized = survey_container.on_view_change
     page.add(survey_container)
-    
-    # Initialize content after adding to page
-    survey_container.initialize_content()
     
     # Animate gradient
     if hasattr(survey_container.title_text, "animate_gradient_task"):
@@ -257,8 +243,9 @@ def main(page: ft.Page):
     survey_container.on_view_change(None)
 
 
+
 if __name__ == "__main__":
     ft.app(
         target=main,
-        view=ft.WEB_BROWSER,
+        assets_dir="assets"
     )
